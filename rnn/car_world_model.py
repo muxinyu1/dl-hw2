@@ -9,81 +9,25 @@ with open("../../car_racing_data_32x32_120.pkl", "rb") as f:
 class WorldModel(nn.Module):
     def __init__(self, action_size, hidden_size, output_size):
         super(WorldModel, self).__init__()
-        # Image encoder
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2, padding=2)  # Output: [batch_size, 16, 16, 16]
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2, padding=2)  # Output: [batch_size, 32, 8, 8]
-        self.relu = nn.ReLU()
-        self.flatten = nn.Flatten()
-        image_feature_size = 32 * 8 * 8  # Flattened feature size
-
-        # Action encoder
-        self.action_encoder = nn.Linear(action_size, 128)
-
-        # LSTM input size
-        lstm_input_size = image_feature_size + 128
-        self.hidden_size = hidden_size
-
-        # Manually define LSTM parameters
-        self.Wx = nn.Linear(lstm_input_size, 4 * hidden_size, bias=True)
-        self.Wh = nn.Linear(hidden_size, 4 * hidden_size, bias=False)
-
-        # Decoder to predict next state
-        self.decoder = nn.Linear(hidden_size, output_size)
+        self.cnn = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Flatten()
+        )
+        self.cnn_output_size = 32 * 8 * 8  # Assuming input images are 32x32
+        self.lstm_input_size = self.cnn_output_size + action_size
+        self.lstm = nn.LSTM(self.lstm_input_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
 
     def forward(self, state, action, hidden=None):
-        """
-        Forward pass for the WorldModel.
-        Args:
-            state: Tensor of shape [batch_size, 3, 32, 32] (current RGB image at this time step).
-            action: Tensor of shape [batch_size, action_size] (action vector).
-            hidden: Tuple (h_t, c_t) of hidden states for LSTM, each of shape [batch_size, hidden_size].
-        Returns:
-            next_state_pred: Tensor of shape [batch_size, output_size] (flattened next state prediction).
-            hidden: Updated hidden state tuple (h_t, c_t) for the LSTM.
-        """
         batch_size = state.size(0)
-
-        # Encode the state (image)
-        x = self.relu(self.conv1(state))   # [batch_size, 16, 16, 16]
-        x = self.relu(self.conv2(x))       # [batch_size, 32, 8, 8]
-        x = self.flatten(x)                # [batch_size, image_feature_size]
-
-        # Encode the action
-        a = self.relu(self.action_encoder(action))  # [batch_size, 128]
-
-        # Concatenate image and action features
-        xt = torch.cat([x, a], dim=1)  # [batch_size, lstm_input_size]
-
-        # Initialize hidden and cell states if not provided
-        if hidden is None:
-            h_t_prev = torch.zeros(batch_size, self.hidden_size, device=xt.device)
-            c_t_prev = torch.zeros(batch_size, self.hidden_size, device=xt.device)
-        else:
-            h_t_prev, c_t_prev = hidden  # Each is [batch_size, hidden_size]
-
-        # Compute activation vector
-        a_t = self.Wx(xt) + self.Wh(h_t_prev)  # [batch_size, 4 * hidden_size]
-
-        # Split activation vector into gates
-        ai, af, ao, ag = torch.chunk(a_t, 4, dim=1)  # Each is [batch_size, hidden_size]
-
-        # Compute gates
-        i_t = torch.sigmoid(ai)  # Input gate
-        f_t = torch.sigmoid(af)  # Forget gate
-        o_t = torch.sigmoid(ao)  # Output gate
-        g_t = torch.tanh(ag)     # Block input
-
-        # Update cell state
-        c_t = f_t * c_t_prev + i_t * g_t  # [batch_size, hidden_size]
-
-        # Update hidden state
-        h_t = o_t * torch.tanh(c_t)  # [batch_size, hidden_size]
-
-        # Decode to predict next state
-        next_state_pred = self.decoder(h_t)  # [batch_size, output_size]
-
-        # Return next state prediction and updated hidden states
-        hidden = (h_t, c_t)
+        cnn_features = self.cnn(state)
+        action = action.view(batch_size, -1)  # Flatten action
+        lstm_input = torch.cat([cnn_features, action], dim=1).unsqueeze(1)  # Add sequence dimension
+        lstm_out, hidden = self.lstm(lstm_input, hidden)
+        next_state_pred = self.fc(lstm_out.squeeze(1))
         return next_state_pred, hidden
 
 
