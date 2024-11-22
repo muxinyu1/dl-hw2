@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pickle
 
-with open("car_racing_data_32x32_120.pkl", "rb") as f:
+with open("../../car_racing_data_32x32_120.pkl", "rb") as f:
     data = pickle.load(f)
 
 class WorldModel(nn.Module):
