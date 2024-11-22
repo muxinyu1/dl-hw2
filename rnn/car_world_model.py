@@ -9,25 +9,58 @@ with open("../../car_racing_data_32x32_120.pkl", "rb") as f:
 class WorldModel(nn.Module):
     def __init__(self, action_size, hidden_size, output_size):
         super(WorldModel, self).__init__()
-        self.cnn = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Flatten()
-        )
-        self.cnn_output_size = 32 * 8 * 8  # Assuming input images are 32x32
-        self.lstm_input_size = self.cnn_output_size + action_size
-        self.lstm = nn.LSTM(self.lstm_input_size, hidden_size, batch_first=True)
-        self.fc = nn.Linear(hidden_size, output_size)
-
+        
+        # Parameters
+        self.action_size = action_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        
+        # Layers
+        self.fc_state = nn.Linear(3 * 32 * 32, hidden_size)  # Flatten image and project to hidden_size
+        self.fc_action = nn.Linear(action_size, hidden_size)  # Project action to hidden_size
+        self.fc_input = nn.Linear(hidden_size * 2, hidden_size * 4)  # Input + Action
+        
+        self.fc_output = nn.Linear(hidden_size, output_size)  # Project hidden state to output
+        
     def forward(self, state, action, hidden=None):
         batch_size = state.size(0)
-        cnn_features = self.cnn(state)
-        action = action.view(batch_size, -1)  # Flatten action
-        lstm_input = torch.cat([cnn_features, action], dim=1).unsqueeze(1)  # Add sequence dimension
-        lstm_out, hidden = self.lstm(lstm_input, hidden)
-        next_state_pred = self.fc(lstm_out.squeeze(1))
+        
+        # Flatten the input state
+        state_flat = state.view(batch_size, -1)  # [batch_size, 3*32*32]
+        
+        # Project state and action to hidden_size
+        state_proj = self.fc_state(state_flat)  # [batch_size, hidden_size]
+        action_proj = self.fc_action(action)   # [batch_size, hidden_size]
+        
+        # Concatenate state and action
+        combined = torch.cat([state_proj, action_proj], dim=-1)  # [batch_size, hidden_size*2]
+        
+        # Compute LSTM gates
+        if hidden is None:
+            h_t = torch.zeros(1, batch_size, self.hidden_size, device=state.device)
+            c_t = torch.zeros(1, batch_size, self.hidden_size, device=state.device)
+        else:
+            h_t, c_t = hidden
+        
+        gates = self.fc_input(combined)  # [batch_size, hidden_size*4]
+        i_t, f_t, o_t, g_t = torch.chunk(gates, 4, dim=-1)  # Split into 4 gates
+
+        # Gate activations
+        i_t = torch.sigmoid(i_t)  # Input gate
+        f_t = torch.sigmoid(f_t)  # Forget gate
+        o_t = torch.sigmoid(o_t)  # Output gate
+        g_t = torch.tanh(g_t)     # Candidate cell state
+        
+        # Update cell state and hidden state
+        c_t = f_t * c_t.squeeze(0) + i_t * g_t  # [batch_size, hidden_size]
+        h_t = o_t * torch.tanh(c_t)            # [batch_size, hidden_size]
+        
+        # Update hidden as tuple
+        hidden = (h_t.unsqueeze(0), c_t.unsqueeze(0))  # [1, batch_size, hidden_size] for both
+        
+        # Project to output size (flattened next state)
+        next_state_pred = self.fc_output(h_t)  # [batch_size, output_size]
+        
         return next_state_pred, hidden
 
 
