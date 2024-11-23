@@ -90,7 +90,7 @@ def evaluate(loader, mode="Validation"):
 
 # 训练模型
 train_losses, val_losses = [], []
-for epoch in range(1, 51):  
+for epoch in range(1, 200):  
     train_loss = train()
     val_loss = evaluate(val_loader)
     train_losses.append(train_loss)
