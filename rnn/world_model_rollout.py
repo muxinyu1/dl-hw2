@@ -216,20 +216,26 @@ def autoregressive_rollout(model, initial_state, actions, sequence_length):
 def plot_rollout_comparison(ground_truth, pred_teacher_forcing, pred_autoregressive, steps=10):
     plt.figure(figsize=(15, 5))
     for t in range(steps):
+        # Ground Truth
         plt.subplot(3, steps, t + 1)
-        plt.imshow(ground_truth[t].permute(1, 2, 0).numpy())
+        plt.imshow(ground_truth[t].cpu().permute(1, 2, 0).numpy())  # 使用 .cpu() 将张量移至主机内存
         plt.axis('off')
         plt.title(f"Ground Truth {t}")
+        
+        # Teacher Forcing Predictions
         plt.subplot(3, steps, steps + t + 1)
-        plt.imshow(pred_teacher_forcing[t].view(3, 32, 32).permute(1, 2, 0).numpy())
+        plt.imshow(pred_teacher_forcing[t].view(3, 32, 32).cpu().permute(1, 2, 0).numpy())
         plt.axis('off')
         plt.title(f"Teacher Forcing {t}")
+        
+        # Autoregressive Predictions
         plt.subplot(3, steps, 2 * steps + t + 1)
-        plt.imshow(pred_autoregressive[t].view(3, 32, 32).permute(1, 2, 0).numpy())
+        plt.imshow(pred_autoregressive[t].view(3, 32, 32).cpu().permute(1, 2, 0).numpy())
         plt.axis('off')
         plt.title(f"Autoregressive {t}")
     plt.tight_layout()
     plt.show()
+
 
 # ----------------------------
 # 测试 Rollout
