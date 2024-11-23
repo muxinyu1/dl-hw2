@@ -4,25 +4,29 @@ from torch_geometric.data import DataLoader
 from torch_geometric.datasets import QM9
 from torch_geometric.nn import GINConv, global_mean_pool
 import torch.optim as optim
-from sklearn.metrics import r2_score
+import wandb
 import numpy as np
+from sklearn.metrics import r2_score
 
-# Load QM9 dataset
+# 初始化 wandb
+wandb.init(project="QM9-GIN", name="GIN-dipole-prediction")
+
+# 加载 QM9 数据集
 path = './data/QM9'
 dataset = QM9(path)
-DIPOLE_INDEX = 0  # Dipole moment index in target `y`
+DIPOLE_INDEX = 0  # 偶极矩在目标 y 中的位置
 
-# Split dataset
+# 数据集划分
 train_dataset = dataset[:10000]
 val_dataset = dataset[10000:11000]
 test_dataset = dataset[11000:12000]
 
-# Create data loaders
+# 创建数据加载器
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-# Define GIN model
+# 定义 GIN 模型
 class GIN(torch.nn.Module):
     def __init__(self, hidden_dim=64):
         super(GIN, self).__init__()
@@ -32,25 +36,25 @@ class GIN(torch.nn.Module):
         nn2 = torch.nn.Sequential(torch.nn.Linear(hidden_dim, hidden_dim), torch.nn.ReLU(), torch.nn.Linear(hidden_dim, hidden_dim))
         self.conv2 = GINConv(nn2)
 
-        self.lin = torch.nn.Linear(hidden_dim, 1)  # Output layer for dipole moment
+        self.lin = torch.nn.Linear(hidden_dim, 1)  # 输出偶极矩预测值
 
     def forward(self, data):
-        x = torch.cat([data.x, data.pos], dim=1)  # Concatenate node features and coordinates
+        x = torch.cat([data.x, data.pos], dim=1)  # 拼接节点特征和坐标
         edge_index = data.edge_index
         batch = data.batch
 
         x = F.relu(self.conv1(x, edge_index))
         x = F.relu(self.conv2(x, edge_index))
-        x = global_mean_pool(x, batch)  # Aggregate node features to graph features
-        x = self.lin(x)  # Final prediction
+        x = global_mean_pool(x, batch)  # 图级别聚合
+        x = self.lin(x)  # 最终预测
         return x
 
-# Set up device, model, optimizer
+# 初始化设备、模型和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GIN(hidden_dim=128).to(device)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Training and evaluation functions
+# 训练函数
 def train():
     model.train()
     total_loss = 0
@@ -62,9 +66,12 @@ def train():
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * data.num_graphs
-    return total_loss / len(train_loader.dataset)
+    avg_loss = total_loss / len(train_loader.dataset)
+    wandb.log({"Train Loss": avg_loss})  # 记录训练损失到 wandb
+    return avg_loss
 
-def evaluate(loader):
+# 评估函数
+def evaluate(loader, mode="Validation"):
     model.eval()
     total_loss = 0
     all_preds = []
@@ -78,21 +85,25 @@ def evaluate(loader):
             all_preds.append(out.cpu().numpy())
             all_true.append(data.y[:, DIPOLE_INDEX].unsqueeze(1).cpu().numpy())
 
-    # Flatten predictions and true values for R² calculation
+    avg_loss = total_loss / len(loader.dataset)
     all_preds = np.concatenate(all_preds, axis=0)
     all_true = np.concatenate(all_true, axis=0)
     r2 = r2_score(all_true, all_preds)
-    return total_loss / len(loader.dataset), r2
+    wandb.log({f"{mode} Loss": avg_loss, f"{mode} R²": r2})  # 记录到 wandb
+    return avg_loss, r2
 
-# Train and evaluate the model
+# 训练和验证
 train_losses, val_losses = [], []
 for epoch in range(1, 51):
     train_loss = train()
-    val_loss, val_r2 = evaluate(val_loader)
+    val_loss, val_r2 = evaluate(val_loader, mode="Validation")
     train_losses.append(train_loss)
     val_losses.append(val_loss)
     print(f'Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val R²: {val_r2:.4f}')
 
-# Test performance
-test_loss, test_r2 = evaluate(test_loader)
+# 测试集评估
+test_loss, test_r2 = evaluate(test_loader, mode="Test")
 print(f'Test Loss: {test_loss:.4f}, Test R²: {test_r2:.4f}')
+
+# 结束 wandb 运行
+wandb.finish()
