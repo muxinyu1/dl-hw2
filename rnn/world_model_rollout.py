@@ -192,10 +192,9 @@ def teacher_forcing_rollout(model, initial_state, actions, ground_truth_states, 
             action = actions[t].unsqueeze(0).to(device)
             next_state_gt = ground_truth_states[t + 1].view(1, -1).to(device)
             next_state_pred, hidden = model(state, action, hidden)
-            predictions.append(next_state_pred.squeeze(0).cpu())
+            predictions.append(next_state_pred.view(3, 32, 32).cpu())  # 调整输出形状
             state = next_state_gt.unsqueeze(0)
     return torch.stack(predictions)
-
 
 def autoregressive_rollout(model, initial_state, actions, sequence_length):
     model.eval()
@@ -206,8 +205,8 @@ def autoregressive_rollout(model, initial_state, actions, sequence_length):
         for t in range(sequence_length - 1):
             action = actions[t].unsqueeze(0).to(device)
             next_state_pred, hidden = model(state, action, hidden)
-            predictions.append(next_state_pred.squeeze(0).cpu())
-            state = next_state_pred.unsqueeze(0)  # 使用模型的预测作为下一步输入
+            predictions.append(next_state_pred.view(3, 32, 32).cpu())  # 调整输出形状
+            state = next_state_pred.unsqueeze(0)
     return torch.stack(predictions)
 
 # ----------------------------
