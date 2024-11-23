@@ -94,7 +94,7 @@ def evaluate(loader, mode="Validation"):
 
 # 训练和验证
 train_losses, val_losses = [], []
-for epoch in range(1, 51):
+for epoch in range(1, 201):
     train_loss = train()
     val_loss, val_r2 = evaluate(val_loader, mode="Validation")
     train_losses.append(train_loss)
