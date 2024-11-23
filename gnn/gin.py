@@ -1,15 +1,16 @@
 import torch
 import torch.nn.functional as F
-from torch_geometric.data import DataLoader
+from torch_geometric.data import DataLoader, Data
 from torch_geometric.datasets import QM9
 from torch_geometric.nn import GINConv, global_mean_pool, BatchNorm
 import torch.optim as optim
 import wandb
 import numpy as np
 from sklearn.metrics import r2_score
+from torch.utils.data import Subset
 
 # 初始化 wandb
-wandb.init(project="QM9-GIN", name="GIN-optimized")
+wandb.init(project="QM9-GIN", name="GIN-reshuffle")
 
 # 加载 QM9 数据集
 path = './data/QM9'
@@ -21,26 +22,28 @@ train_dataset = dataset[:10000]
 val_dataset = dataset[10000:11000]
 test_dataset = dataset[11000:12000]
 
-# 创建数据加载器
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)  # 增大批量大小
+# 验证和测试集 DataLoader（不需要 shuffle）
 val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-# 定义改进后的 GIN 模型
+# 定义函数，每个 epoch 前随机打乱训练集
+def shuffle_dataset(dataset):
+    indices = torch.randperm(len(dataset))  # 随机生成索引
+    return Subset(dataset, indices)
+
+# 定义 GIN 模型
 class GIN(torch.nn.Module):
     def __init__(self, hidden_dim=128, dropout=0.3):
         super(GIN, self).__init__()
         
-        # 第一层 GINConv
         nn1 = torch.nn.Sequential(
             torch.nn.Linear(dataset.num_features + 3, hidden_dim),
             torch.nn.ReLU(),
             torch.nn.Linear(hidden_dim, hidden_dim)
         )
         self.conv1 = GINConv(nn1)
-        self.bn1 = BatchNorm(hidden_dim)  # 批量归一化
+        self.bn1 = BatchNorm(hidden_dim)
         
-        # 第二层 GINConv
         nn2 = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim, hidden_dim),
             torch.nn.ReLU(),
@@ -49,7 +52,6 @@ class GIN(torch.nn.Module):
         self.conv2 = GINConv(nn2)
         self.bn2 = BatchNorm(hidden_dim)
         
-        # 第三层 GINConv
         nn3 = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim, hidden_dim),
             torch.nn.ReLU(),
@@ -58,11 +60,8 @@ class GIN(torch.nn.Module):
         self.conv3 = GINConv(nn3)
         self.bn3 = BatchNorm(hidden_dim)
         
-        # 全连接层
         self.fc1 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = torch.nn.Linear(hidden_dim, 1)
-        
-        # Dropout
         self.dropout = torch.nn.Dropout(dropout)
 
     def forward(self, data):
@@ -70,7 +69,6 @@ class GIN(torch.nn.Module):
         edge_index = data.edge_index
         batch = data.batch
         
-        # GINConv 层
         x = F.relu(self.bn1(self.conv1(x, edge_index)))
         x = self.dropout(x)
         x = F.relu(self.bn2(self.conv2(x, edge_index)))
@@ -78,7 +76,6 @@ class GIN(torch.nn.Module):
         x = F.relu(self.bn3(self.conv3(x, edge_index)))
         x = self.dropout(x)
         
-        # 图级池化和全连接层
         x = global_mean_pool(x, batch)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
@@ -86,11 +83,11 @@ class GIN(torch.nn.Module):
 
 # 初始化设备、模型和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = GIN(hidden_dim=256, dropout=0.3).to(device)  # 增加隐藏层维度
-optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4)  # 添加权重衰减
+model = GIN(hidden_dim=256, dropout=0.3).to(device)
+optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4)
 
 # 训练函数
-def train():
+def train(train_loader):
     model.train()
     total_loss = 0
     for data in train_loader:
@@ -129,8 +126,12 @@ def evaluate(loader, mode="Validation"):
 
 # 训练和验证
 train_losses, val_losses = [], []
-for epoch in range(1, 101):  # 增加训练 epoch
-    train_loss = train()
+for epoch in range(1, 101):
+    # 每个 epoch 重新 shuffle 训练数据
+    shuffled_train_dataset = shuffle_dataset(train_dataset)
+    train_loader = DataLoader(shuffled_train_dataset, batch_size=64, shuffle=False)
+    
+    train_loss = train(train_loader)
     val_loss, val_r2 = evaluate(val_loader, mode="Validation")
     train_losses.append(train_loss)
     val_losses.append(val_loss)
