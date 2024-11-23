@@ -185,29 +185,30 @@ def evaluate():
 def teacher_forcing_rollout(model, initial_state, actions, ground_truth_states, sequence_length):
     model.eval()
     predictions = []
-    state = initial_state.unsqueeze(0)
-    hidden = (torch.zeros(1, 1, hidden_size).to(device), torch.zeros(1, 1, hidden_size).to(device))
+    state = initial_state.unsqueeze(0).to(device)  # 确保 state 在同一设备
+    hidden = (torch.zeros(1, 1, hidden_size, device=device), torch.zeros(1, 1, hidden_size, device=device))
     with torch.no_grad():
         for t in range(sequence_length - 1):
-            action = actions[t].unsqueeze(0).to(device)
-            next_state_gt = ground_truth_states[t + 1].view(1, -1).to(device)
+            action = actions[t].unsqueeze(0).to(device)  # 保证 action 在同一设备
+            next_state_gt = ground_truth_states[t + 1].view(1, -1).to(device)  # ground truth
             next_state_pred, hidden = model(state, action, hidden)
-            predictions.append(next_state_pred.view(3, 32, 32).cpu())  # 调整输出形状
+            predictions.append(next_state_pred.view(3, 32, 32))  # 保持预测在设备上
             state = next_state_gt.unsqueeze(0)
-    return torch.stack(predictions)
+    return torch.stack(predictions).to(device)  # 确保返回值在同一设备
 
 def autoregressive_rollout(model, initial_state, actions, sequence_length):
     model.eval()
     predictions = []
-    state = initial_state.unsqueeze(0)
-    hidden = (torch.zeros(1, 1, hidden_size).to(device), torch.zeros(1, 1, hidden_size).to(device))
+    state = initial_state.unsqueeze(0).to(device)  # 确保 state 在同一设备
+    hidden = (torch.zeros(1, 1, hidden_size, device=device), torch.zeros(1, 1, hidden_size, device=device))
     with torch.no_grad():
         for t in range(sequence_length - 1):
-            action = actions[t].unsqueeze(0).to(device)
+            action = actions[t].unsqueeze(0).to(device)  # 保证 action 在同一设备
             next_state_pred, hidden = model(state, action, hidden)
-            predictions.append(next_state_pred.view(3, 32, 32).cpu())  # 调整输出形状
+            predictions.append(next_state_pred.view(3, 32, 32))  # 保持预测在设备上
             state = next_state_pred.unsqueeze(0)
-    return torch.stack(predictions)
+    return torch.stack(predictions).to(device)  # 确保返回值在同一设备
+
 
 # ----------------------------
 # 可视化和误差分析
@@ -271,10 +272,10 @@ def test_rollout():
 
     # 误差分析
     mse_teacher_forcing = torch.mean(
-        (ground_truth_states[1:steps + 1] - teacher_forcing_predictions) ** 2, dim=(1, 2, 3)
+        (ground_truth_states[1:steps + 1].to(device) - teacher_forcing_predictions) ** 2, dim=(1, 2, 3)
     )
     mse_autoregressive = torch.mean(
-        (ground_truth_states[1:steps + 1] - autoregressive_predictions) ** 2, dim=(1, 2, 3)
+        (ground_truth_states[1:steps + 1].to(device) - autoregressive_predictions) ** 2, dim=(1, 2, 3)
     )
 
     print("MSE 每步误差对比:")
