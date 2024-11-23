@@ -44,7 +44,7 @@ class GCN(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GCN(hidden_dim=128).to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.01)
 
 # 更新 train 和 evaluate 函数以记录到 wandb
 def train():
@@ -92,7 +92,7 @@ def evaluate(loader, mode="Validation"):
 
 # 训练模型
 train_losses, val_losses = [], []
-for epoch in range(1, 51):  
+for epoch in range(1, 200):  
     train_loss = train()
     val_loss = evaluate(val_loader)
     train_losses.append(train_loss)
