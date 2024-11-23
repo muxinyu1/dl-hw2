@@ -44,7 +44,7 @@ class GCN(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GCN(hidden_dim=128).to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.01)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # 更新 train 和 evaluate 函数以记录到 wandb
 def train():
