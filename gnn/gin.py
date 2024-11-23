@@ -2,14 +2,14 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.data import DataLoader
 from torch_geometric.datasets import QM9
-from torch_geometric.nn import GINConv, global_mean_pool
+from torch_geometric.nn import GINConv, global_mean_pool, BatchNorm
 import torch.optim as optim
 import wandb
 import numpy as np
 from sklearn.metrics import r2_score
 
 # 初始化 wandb
-wandb.init(project="QM9-GIN", name="GIN-dipole-prediction")
+wandb.init(project="QM9-GIN", name="GIN-optimized")
 
 # 加载 QM9 数据集
 path = './data/QM9'
@@ -22,37 +22,72 @@ val_dataset = dataset[10000:11000]
 test_dataset = dataset[11000:12000]
 
 # 创建数据加载器
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)  # 增大批量大小
+val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-# 定义 GIN 模型
+# 定义改进后的 GIN 模型
 class GIN(torch.nn.Module):
-    def __init__(self, hidden_dim=64):
+    def __init__(self, hidden_dim=128, dropout=0.3):
         super(GIN, self).__init__()
-        nn1 = torch.nn.Sequential(torch.nn.Linear(dataset.num_features + 3, hidden_dim), torch.nn.ReLU(), torch.nn.Linear(hidden_dim, hidden_dim))
+        
+        # 第一层 GINConv
+        nn1 = torch.nn.Sequential(
+            torch.nn.Linear(dataset.num_features + 3, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, hidden_dim)
+        )
         self.conv1 = GINConv(nn1)
-
-        nn2 = torch.nn.Sequential(torch.nn.Linear(hidden_dim, hidden_dim), torch.nn.ReLU(), torch.nn.Linear(hidden_dim, hidden_dim))
+        self.bn1 = BatchNorm(hidden_dim)  # 批量归一化
+        
+        # 第二层 GINConv
+        nn2 = torch.nn.Sequential(
+            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, hidden_dim)
+        )
         self.conv2 = GINConv(nn2)
-
-        self.lin = torch.nn.Linear(hidden_dim, 1)  # 输出偶极矩预测值
+        self.bn2 = BatchNorm(hidden_dim)
+        
+        # 第三层 GINConv
+        nn3 = torch.nn.Sequential(
+            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, hidden_dim)
+        )
+        self.conv3 = GINConv(nn3)
+        self.bn3 = BatchNorm(hidden_dim)
+        
+        # 全连接层
+        self.fc1 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.fc2 = torch.nn.Linear(hidden_dim, 1)
+        
+        # Dropout
+        self.dropout = torch.nn.Dropout(dropout)
 
     def forward(self, data):
         x = torch.cat([data.x, data.pos], dim=1)  # 拼接节点特征和坐标
         edge_index = data.edge_index
         batch = data.batch
-
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.relu(self.conv2(x, edge_index))
-        x = global_mean_pool(x, batch)  # 图级别聚合
-        x = self.lin(x)  # 最终预测
+        
+        # GINConv 层
+        x = F.relu(self.bn1(self.conv1(x, edge_index)))
+        x = self.dropout(x)
+        x = F.relu(self.bn2(self.conv2(x, edge_index)))
+        x = self.dropout(x)
+        x = F.relu(self.bn3(self.conv3(x, edge_index)))
+        x = self.dropout(x)
+        
+        # 图级池化和全连接层
+        x = global_mean_pool(x, batch)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
         return x
 
 # 初始化设备、模型和优化器
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = GIN(hidden_dim=128).to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+model = GIN(hidden_dim=256, dropout=0.3).to(device)  # 增加隐藏层维度
+optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4)  # 添加权重衰减
 
 # 训练函数
 def train():
@@ -94,7 +129,7 @@ def evaluate(loader, mode="Validation"):
 
 # 训练和验证
 train_losses, val_losses = [], []
-for epoch in range(1, 201):
+for epoch in range(1, 101):  # 增加训练 epoch
     train_loss = train()
     val_loss, val_r2 = evaluate(val_loader, mode="Validation")
     train_losses.append(train_loss)
