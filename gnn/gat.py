@@ -4,7 +4,12 @@ from torch_geometric.data import DataLoader
 from torch_geometric.datasets import QM9
 from torch_geometric.nn import GATConv, global_mean_pool
 import torch.optim as optim
-import matplotlib.pyplot as plt
+import numpy as np
+import wandb
+from sklearn.metrics import r2_score
+
+# 初始化 wandb 项目
+wandb.init(project="QM9-GAT", name="GAT-dipole-prediction")
 
 path = './data/QM9'
 dataset = QM9(path)
@@ -51,18 +56,37 @@ def train():
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * data.num_graphs
-    return total_loss / len(train_loader.dataset)
+    avg_loss = total_loss / len(train_loader.dataset)
+    wandb.log({"Train Loss": avg_loss})  # 记录到 wandb
+    return avg_loss
 
-def evaluate(loader):
+def evaluate(loader, mode="Validation"):
     model.eval()
     total_loss = 0
+    all_preds = []
+    all_true = []
     with torch.no_grad():
         for data in loader:
             data = data.to(device)
             out = model(data)
             loss = F.mse_loss(out, data.y[:, DIPOLE_INDEX].unsqueeze(1))
             total_loss += loss.item() * data.num_graphs
-    return total_loss / len(loader.dataset)
+            all_preds.append(out.cpu().numpy())
+            all_true.append(data.y[:, DIPOLE_INDEX].unsqueeze(1).cpu().numpy())
+    avg_loss = total_loss / len(loader.dataset)
+    wandb.log({f"{mode} Loss": avg_loss})  # 记录到 wandb
+
+    # 将预测值和真实值拼接为完整数组
+    all_preds = np.concatenate(all_preds, axis=0)
+    all_true = np.concatenate(all_true, axis=0)
+
+    if mode == "Test":
+        # 计算 R² 分数
+        r2 = r2_score(all_true, all_preds)
+        wandb.log({"Test R2": r2})
+        print(f"R² Score on Test Set: {r2:.4f}")
+    
+    return avg_loss
 
 # 训练模型
 train_losses, val_losses = [], []
@@ -74,5 +98,14 @@ for epoch in range(1, 51):
     print(f'Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
 
 # 测试集评估
-test_loss = evaluate(test_loader)
+test_loss = evaluate(test_loader, mode="Test")
 print(f'Test Loss: {test_loss:.4f}')
+
+# 可选：记录最终损失到 wandb
+wandb.log({
+    "Final Train Loss": train_losses,
+    "Final Validation Loss": val_losses,
+})
+
+# 结束 wandb 运行
+wandb.finish()
