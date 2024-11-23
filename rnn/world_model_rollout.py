@@ -248,20 +248,13 @@ def test_rollout():
     initial_state = states[0][0]  # 使用测试集中的一个序列
     sequence_actions = actions[0]
     ground_truth_states = states[0]
-
-    # Teacher Forcing Rollout
     teacher_forcing_predictions = teacher_forcing_rollout(
         model, initial_state, sequence_actions, ground_truth_states, sequence_length
     )
-
-    # Autoregressive Rollout
     autoregressive_predictions = autoregressive_rollout(
         model, initial_state, sequence_actions, sequence_length
     )
-
-    # **修正的 steps 参数：sequence_length - 1**
     steps = sequence_length - 1
-
     # 可视化对比
     plot_rollout_comparison(
         ground_truth_states[:steps], 
@@ -269,7 +262,6 @@ def test_rollout():
         autoregressive_predictions, 
         steps=steps
     )
-
     # 误差分析
     mse_teacher_forcing = torch.mean(
         (ground_truth_states[1:steps + 1].to(device) - teacher_forcing_predictions) ** 2, dim=(1, 2, 3)
@@ -277,16 +269,12 @@ def test_rollout():
     mse_autoregressive = torch.mean(
         (ground_truth_states[1:steps + 1].to(device) - autoregressive_predictions) ** 2, dim=(1, 2, 3)
     )
-
     print("MSE 每步误差对比:")
     print("Teacher Forcing:", mse_teacher_forcing)
     print("Autoregressive:", mse_autoregressive)
-
     print("\n累计误差:")
     print("Teacher Forcing:", torch.sum(mse_teacher_forcing).item())
     print("Autoregressive:", torch.sum(mse_autoregressive).item())
-
-    # 将结果记录到 wandb
     wandb.log({
         "Test Rollout Teacher Forcing MSE": torch.sum(mse_teacher_forcing).item(),
         "Test Rollout Autoregressive MSE": torch.sum(mse_autoregressive).item()
