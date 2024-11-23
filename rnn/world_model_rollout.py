@@ -213,12 +213,12 @@ def autoregressive_rollout(model, initial_state, actions, sequence_length):
 # ----------------------------
 # 可视化和误差分析
 # ----------------------------
-def plot_rollout_comparison(ground_truth, pred_teacher_forcing, pred_autoregressive, steps=10):
+def plot_rollout_comparison(ground_truth, pred_teacher_forcing, pred_autoregressive, steps):
     plt.figure(figsize=(15, 5))
     for t in range(steps):
         # Ground Truth
         plt.subplot(3, steps, t + 1)
-        plt.imshow(ground_truth[t].cpu().permute(1, 2, 0).numpy())  # 使用 .cpu() 将张量移至主机内存
+        plt.imshow(ground_truth[t].cpu().permute(1, 2, 0).numpy())
         plt.axis('off')
         plt.title(f"Ground Truth {t}")
         
@@ -235,6 +235,7 @@ def plot_rollout_comparison(ground_truth, pred_teacher_forcing, pred_autoregress
         plt.title(f"Autoregressive {t}")
     plt.tight_layout()
     plt.show()
+
 
 
 # ----------------------------
@@ -258,20 +259,23 @@ def test_rollout():
         model, initial_state, sequence_actions, sequence_length
     )
 
+    # **修正的 steps 参数：sequence_length - 1**
+    steps = sequence_length - 1
+
     # 可视化对比
     plot_rollout_comparison(
-        ground_truth_states[:sequence_length], 
+        ground_truth_states[:steps], 
         teacher_forcing_predictions, 
         autoregressive_predictions, 
-        steps=sequence_length
+        steps=steps
     )
 
     # 误差分析
     mse_teacher_forcing = torch.mean(
-        (ground_truth_states[1:sequence_length] - teacher_forcing_predictions) ** 2, dim=(1, 2, 3)
+        (ground_truth_states[1:steps + 1] - teacher_forcing_predictions) ** 2, dim=(1, 2, 3)
     )
     mse_autoregressive = torch.mean(
-        (ground_truth_states[1:sequence_length] - autoregressive_predictions) ** 2, dim=(1, 2, 3)
+        (ground_truth_states[1:steps + 1] - autoregressive_predictions) ** 2, dim=(1, 2, 3)
     )
 
     print("MSE 每步误差对比:")
@@ -287,6 +291,7 @@ def test_rollout():
         "Test Rollout Teacher Forcing MSE": torch.sum(mse_teacher_forcing).item(),
         "Test Rollout Autoregressive MSE": torch.sum(mse_autoregressive).item()
     })
+
 
 # ----------------------------
 # 运行代码
